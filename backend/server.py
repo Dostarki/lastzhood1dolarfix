@@ -128,6 +128,7 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 app.include_router(access_router(db))
 app.add_middleware(CORSMiddleware, allow_origins=os.environ['CORS_ORIGINS'].split(','), allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
+
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(create_admin_router(db, game))
 

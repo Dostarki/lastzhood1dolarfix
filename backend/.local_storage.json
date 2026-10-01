@@ -3346,6 +3346,14 @@
       "chain_id": 4663,
       "created_at": "2026-10-01T16:23:36.817770+00:00",
       "expires_at": "2026-10-08T16:23:36.817770+00:00"
+    },
+    {
+      "session_token": "7nRO42CYsSsUkKeRsvTtZyDDKQMcsq0mXM0JiedjBCFAojfC",
+      "account_id": "0x88a012f9a5ddcfb13c9f41327e69f34b0962fb82",
+      "address": "0x88a012F9A5ddcfB13C9F41327e69F34b0962FB82",
+      "chain_id": 4663,
+      "created_at": "2026-10-01T17:00:49.853946+00:00",
+      "expires_at": "2026-10-08T17:00:49.853946+00:00"
     }
   ],
   "purchase_orders": [
@@ -4004,6 +4012,7 @@
       "usd_str": "$2"
     }
   ],
+  "access_entitlements": [],
   "delivery_inbox": [],
   "soldier_missions": [
     {
@@ -4036,5 +4045,5 @@
       "source_type": "market"
     }
   ],
-  "saved_at": "2026-10-01T16:40:41.486489+00:00"
+  "saved_at": "2026-10-01T17:20:05.509154+00:00"
 }

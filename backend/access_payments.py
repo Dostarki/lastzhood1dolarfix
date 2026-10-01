@@ -13,32 +13,46 @@ async def ensure_access_indexes(db):
 
 
 async def has_paid_access(db, account_id):
+    owner = account_id.lower()
+    entitlement = await db.access_entitlements.find_one(
+        {'account_id': owner, 'paid': True, 'chain_id': CHAIN_ID}, {'_id': 0, 'account_id': 1})
+    if entitlement:
+        return True
+    # Older backups retained fulfilled orders but omitted access_entitlements.
+    # Recover only from a server-verified payment, never from a submitted hash.
+    verified_order = await db.purchase_orders.find_one({
+        'account_id': owner, 'kind': 'access', 'chain_id': CHAIN_ID,
+        'payment_verified': True, 'status': {'$in': ['delivering', 'fulfilled']},
+        'tx_hash': {'$type': 'string'},
+    }, {'_id': 0})
+    if not verified_order:
+        return False
+    await _complete_access(db, verified_order)
     return bool(await db.access_entitlements.find_one(
-        {'account_id': account_id.lower(), 'paid': True, 'chain_id': CHAIN_ID}, {'_id': 0, 'account_id': 1}))
+        {'account_id': owner, 'paid': True, 'chain_id': CHAIN_ID}, {'_id': 0, 'account_id': 1}))
 
 
 async def _complete_access(db, order):
     if order.get('kind') != 'access' or order.get('payment_verified') is not True or not order.get('tx_hash'):
         raise PermissionError('verified_payment_required')
     now = datetime.now(timezone.utc).isoformat()
+    confirmed_at = order.get('payment_verified_at') or order.get('fulfilled_at') or now
     # Durable verified order -> idempotent entitlement -> fulfilled marker.
     # Retrying after a crash between writes completes, but never bills twice.
     await db.access_entitlements.update_one({'account_id': order['account_id']}, {'$setOnInsert': {
         'account_id': order['account_id'], 'paid': True, 'chain_id': CHAIN_ID,
         'source_order_id': order['order_id'], 'tx_hash': order['tx_hash'],
-        'quote': order.get('verified_quote') or order['quote'], 'confirmed_at': now,
+        'quote': order.get('verified_quote') or order['quote'], 'confirmed_at': confirmed_at,
     }}, upsert=True)
     await db.purchase_orders.update_one({'order_id': order['order_id'], 'payment_verified': True},
-        {'$set': {'status': 'fulfilled', 'fulfilled_at': now}})
+        {'$set': {'status': 'fulfilled', 'fulfilled_at': order.get('fulfilled_at') or now}})
 
 
 async def access_status(db, account_id):
     owner = account_id.lower()
+    paid = await has_paid_access(db, owner)
     order = await db.purchase_orders.find_one({'access_wallet': owner, 'kind': 'access'}, {'_id': 0})
-    if order and order.get('status') == 'delivering' and order.get('payment_verified') is True:
-        await _complete_access(db, order)
-        order = await db.purchase_orders.find_one({'order_id': order['order_id']}, {'_id': 0})
-    return {'paid': await has_paid_access(db, owner), 'price_usd': '1.00', 'chain_id': CHAIN_ID,
+    return {'paid': paid, 'price_usd': '1.00', 'chain_id': CHAIN_ID,
             'treasury': TREASURY, 'order': order}
 
 

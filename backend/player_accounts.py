@@ -170,7 +170,7 @@ async def sync_db_from_file(db):
             await db.player_progress.update_one({'account_id': doc['account_id']}, {'$set': doc}, upsert=True)
         for doc in data.get('auth_sessions', []):
             await db.auth_sessions.update_one({'session_token': doc['session_token']}, {'$set': doc}, upsert=True)
-        for collection_name, key in [('purchase_orders', 'order_id'), ('delivery_inbox', 'entitlement_id'), ('soldier_missions', 'mission_id'), ('economy_ledger', 'transaction_id')]:
+        for collection_name, key in [('purchase_orders', 'order_id'), ('access_entitlements', 'account_id'), ('delivery_inbox', 'entitlement_id'), ('soldier_missions', 'mission_id'), ('economy_ledger', 'transaction_id')]:
             for doc in data.get(collection_name, []):
                 await getattr(db, collection_name).update_one({key: doc[key]}, {'$set': doc}, upsert=True)
         log.info(f'Loaded persistent storage from {LOCAL_STORAGE_FILE}')
@@ -188,6 +188,7 @@ async def sync_db_to_file(db):
             'player_progress': progress,
             'auth_sessions': sessions,
             'purchase_orders': await db.purchase_orders.find({}, {'_id': 0}).to_list(10000),
+            'access_entitlements': await db.access_entitlements.find({}, {'_id': 0}).to_list(10000),
             'delivery_inbox': await db.delivery_inbox.find({}, {'_id': 0}).to_list(10000),
             'soldier_missions': await db.soldier_missions.find({}, {'_id': 0}).to_list(10000),
             'economy_ledger': await db.economy_ledger.find({}, {'_id': 0}).to_list(10000),

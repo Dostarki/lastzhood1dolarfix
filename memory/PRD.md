@@ -1,7 +1,7 @@
 # DEADZONE — Ürün ve geliştirme kaydı
 
 ## Orijinal problem statement
-Bu çalışma dalının güncel kaynak reposu `https://github.com/Dostarki/lastzoneson`: kullanıcı repoyu `/app` içinde çalıştırmayı istedi; önceki oturumda kurulum ve temel erişim kontrolü yapıldı. Aşağıdaki eski ürün gereksinimleri ve test kayıtları repoyla taşınmıştır; güncel dalda bütünü yeniden doğrulanmış değildir. Önceki kaynaklardan biri `https://github.com/Dostarki/dayhoodz` idi.
+Devralma özetine göre güncel kaynak repo `https://github.com/Dostarki/lastsonoyun`; orijinal istek: "https://github.com/Dostarki/lastsonoyun bu repoyu çek ve çalıştır. lastzhood.fun a deploy edeceğim emergent üzerinden". Önceki oturumda kurulum ve temel erişim kontrolü yapıldı. Aşağıdaki eski ürün gereksinimleri ve test kayıtları repoyla taşınmıştır; güncel dalda bütünü yeniden doğrulanmış değildir. Önceki kaynaklar arasında `lastzoneson` ve `dayhoodz` vardı.
 
 Bir zombi project oyunu istiyorum. Webde çalışacak grafikleri ise görselde attığım gibi olacak ve online bir oyun olacak. Harita ise büyük bir alan olacak etrafta ağaç ev gibi rastgele renderlensin oynayış tarzı ise GTA gibi olacak. W A S D ve mouse ile oynanabilecek olacak. Harita büyüklüğü ise 200 oyuncuyu rahat şekilde sığacak bir alan olacak. Kamera ise oyuncuyu takip edecek ve sadece gittiği alanı görebilecek. Oyuna başlamak için ise Start game olacak ve silahını seçecek. Silahlar ise AK47,Ak117,AK107,Otomatik fişek atan tüfek ve bu tüfekler kaliteli görünsün oyuncunun elinde net belli olsun. Frendly fire açık olacak etrafta rastgele zombiler olacak öldürdükçe puan gelecek.
 
@@ -271,3 +271,29 @@ Bir zombi project oyunu istiyorum. Webde çalışacak grafikleri ise görselde a
 ## Sonraki adımlar (P1)
 - Gerçek cüzdanla uçtan uca $1 erişim ve market satın alma denemesi (kullanıcının fonlu cüzdanı gerekli).
 - Kullanıcının planladığı "güncelleme" kapsamının netleştirilmesi.
+
+## 2026-10-01 — $1 erişim ödemesinde tamamlanmış işlem sonrası takılma
+### Güncel istek ve kapsam
+- Kullanıcı: "UNLOCK PLAY $1 butonuna basıyorum onaylıyorum ardından bu ekranda kalıyor transfer onayı gelmiyor ama OPEN MARKETS çalışıyor yani 1 dolar ücret ödeme sorunun çöz ve test etme sadece fixle."
+- Son kapsam onayı: "Sadece $1 dolar ödemeyi düzelt yeterli". Yeni özellik, market değişikliği, gerçek para gönderimi veya kapsamlı oyun testi yok.
+
+### Kesinleşen neden
+- Ekran görüntüsündeki `0xac9c78597de57de33b8f7014eca3cca6f7f5f8603838ffc2c3df03a191c11557` işlemi Robinhood Mainnet RPC üzerinden salt okunur sorgulandı: başarılı makbuz (`status=1`), doğru cüzdan/alıcı, `371397214892286` wei ve boş calldata.
+- Önizleme Mongo ve mevcut yerel yedekte `5133d09c-2cbb-4b00-8fe1-44c075ec9857` erişim siparişi `fulfilled`, `payment_verified=true`, 13 onaylı; `access_entitlements` kaydı yoktu. Eski yedekleme bu koleksiyonu hiç içermiyordu.
+- `submit_access` fulfilled siparişte `access_status` döndürüyordu; bu fonksiyon sadece `delivering` siparişleri onarıyordu. Sonuç: ödeme bitmiş olsa da `paid=false` ve arayüzde tekrar tekrar onay beklenmesi. Eksik transfer onayı değil, eksik erişim kaydı.
+
+### Uygulanan düzeltme
+- `/backend/access_payments.py`: `has_paid_access`, erişim kaydı eksikse yalnız aynı hesap, doğru zincir, `kind=access`, sunucuda doğrulanmış, hash kayıtlı `delivering/fulfilled` siparişten idempotent erişim kaydı oluşturur. `access_status` onarım sonrası güncel siparişi döndürür. Eski ödeme/doğrulama tarihleri korunur.
+- `/backend/player_accounts.py`: mevcut yedekleme/geri yükleme listesine `access_entitlements` eklendi. Eski sipariş-only yedekleri de otomatik onarılabilir.
+- Yeni ödeme gönderimi, yeni quote veya tekrar tahsilat yapılmaz. Paylaşılmış native transfer/market doğrulaması, ön yüz, kimlik doğrulama ve ortam değişkenleri değiştirilmedi. Kullanıcının cüzdanına özel hardcode veya ücret atlama eklenmedi.
+- Üründeki ödeme doğrulaması MOCKED değildir. Bu dalda `server.py` gerçek Motor/MONGO_URL kullanıyor; mongomock yalnız izole testlerde kullanıldı (devralma özetindeki genel mock fallback ifadesi burada geçerli değil).
+
+### Dar doğrulama ve sınırlar
+- `/test_reports/iteration_12.json`: mevcut erişim regresyonları ve yeni `/backend/tests/test_access_payment_recovery_regression.py` ile **11/11 geçti**. Eksik entitlement kurtarma, aynı hash ile anında paid yanıtı, tekrar çağrıda tek kayıt ve eski tarihler, bekleyen/başarısız/yanlış cüzdan-zincir/market siparişlerinde erişim reddi, yedek roundtrip ve eski yedek kurtarma.
+- Kontroller izole MOCKED Mongo/RPC fixture'larıyla; gerçek para transferi veya kullanıcı verisi üzerinde manuel değişiklik yapılmadı. Önizleme ana sayfası açılıyor. Tam frontend ödeme E2E veya oyun testi yapılmadı.
+- Canlı teşhis için salt okunur istek kuyruğa alındı; bu oturumda canlı teşhis sonucu veya düzeltmenin yayına alındığına dair doğrulama gelmedi. Yeni deploy başlatılmadı; canlı sürümün düzeldiği iddia edilmemeli.
+
+### Sonraki adımlar / kapsam dışı
+- P0: Kod düzeltmesi dar kontrollerden geçti; canlı sürümde aynı cüzdanın mevcut ödemeden erişiminin tanınması henüz doğrulanmadı. Tekrar ödeme istenmemeli.
+- P1: Önceki performans/kapasite işleri bu talebin kapsamı dışında ve ertelendi.
+- P2 / öneri: İleride ödeme siparişi ile erişim kaydı tutarlılığı için otomatik uyarı; uygulanmadı.
