@@ -291,7 +291,12 @@ Bir zombi project oyunu istiyorum. Webde çalışacak grafikleri ise görselde a
 ### Dar doğrulama ve sınırlar
 - `/test_reports/iteration_12.json`: mevcut erişim regresyonları ve yeni `/backend/tests/test_access_payment_recovery_regression.py` ile **11/11 geçti**. Eksik entitlement kurtarma, aynı hash ile anında paid yanıtı, tekrar çağrıda tek kayıt ve eski tarihler, bekleyen/başarısız/yanlış cüzdan-zincir/market siparişlerinde erişim reddi, yedek roundtrip ve eski yedek kurtarma.
 - Kontroller izole MOCKED Mongo/RPC fixture'larıyla; gerçek para transferi veya kullanıcı verisi üzerinde manuel değişiklik yapılmadı. Önizleme ana sayfası açılıyor. Tam frontend ödeme E2E veya oyun testi yapılmadı.
-- Canlı teşhis için salt okunur istek kuyruğa alındı; bu oturumda canlı teşhis sonucu veya düzeltmenin yayına alındığına dair doğrulama gelmedi. Yeni deploy başlatılmadı; canlı sürümün düzeldiği iddia edilmemeli.
+- Sonradan gelen canlı teşhis aynı nedeni doğruladı: production `access_entitlements` boş, aynı erişim siparişi `fulfilled/payment_verified=true`, market siparişi production'da başarılı. Rapor: `/app/deployer-agent-docs/RCA_57f56ee0-6223-41ae-ab91-8910ab303ae5.MD`. Rapordaki "source change authored değil / redeploy çözmez" ifadesi düzeltme yazılmadan önceki duruma aittir; yukarıdaki onarım kodu artık mevcut. Düzeltmenin canlı sürüme ulaştığı henüz doğrulanmadı.
+
+### Tekrarlayan canlı bildirim — son durum
+- Kullanıcı: "Görselde görüldüğü gibi Waiting for 2 confirmations… da kalıyor ödeme onayı gelmiyor cüzdanıma." Üç görselde SIWE giriş imzası (01 October 2026 17:26), aynı eski başarılı transaction/expired quote ve VERIFY EXISTING PAYMENT → bekleme görülüyor. SIWE giriş imzası para transferi değildir; mevcut ödemeyi doğrulama cüzdanda ikinci transfer istememelidir.
+- Kaynaktaki onarımın hâlâ mevcut olduğu kontrol edildi. Canlı teşhis yeniden istendi: çalışan image/revision onarım kodunu içeriyor mu, son yayın hangi snapshot'tan, domain doğru instance'a mı bağlı, canlı order/entitlement ve `/api/access` yanıtları şimdi ne durumda? İstek kuyruğa alındı, yeni sonuç BEKLENİYOR.
+- Yeni bir deploy, gerçek para transferi, production DB değişikliği veya ek kod değişikliği yapılmadı. Eski onarımın canlıya geçtiği görülmeden kullanıcıya çözüldüğü söylenmemeli; tekrar ödeme istenmemeli.
 
 ### Sonraki adımlar / kapsam dışı
 - P0: Kod düzeltmesi dar kontrollerden geçti; canlı sürümde aynı cüzdanın mevcut ödemeden erişiminin tanınması henüz doğrulanmadı. Tekrar ödeme istenmemeli.
