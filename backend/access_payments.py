@@ -90,7 +90,7 @@ async def submit_access(db, account_id, order_id, tx_hash):
         await _complete_access(db, order)
         return await access_status(db, owner)
     try:
-        verification = await verify_transaction(db, order, tx_hash, owner)
+        verification = await verify_transaction(db, order, tx_hash, owner, required_confirmations=1)
     except ValueError as error:
         # A reverted on-chain payment spent no value. Retain its audit record;
         # a future quote may create a new attempt. Pending/unknown never unlocks.

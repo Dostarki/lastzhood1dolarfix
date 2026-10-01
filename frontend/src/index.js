@@ -7,7 +7,7 @@ import "@rainbow-me/rainbowkit/styles.css";
 
 import "@/index.css";
 import App from "@/App";
-import { AccessPaymentDialog } from './components/AccessPaymentDialog';
+import { AccessCheckoutProvider } from './lib/accessCheckoutContext';
 import { wagmiConfig, robinhoodMainnet } from "@/lib/walletConfig";
 import { AuthProvider } from "@/lib/authContext";
 
@@ -35,8 +35,7 @@ root.render(
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <RainbowKitProvider theme={deadzoneRainbowTheme} modalSize="compact" initialChain={robinhoodMainnet}>
-            <App />
-            <AccessPaymentDialog />
+            <AccessCheckoutProvider><App /></AccessCheckoutProvider>
           </RainbowKitProvider>
         </AuthProvider>
       </QueryClientProvider>

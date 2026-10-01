@@ -3,6 +3,8 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useDisconnect, useSwitchChain } from 'wagmi';
 import { Wallet, LogOut, UserCheck, AlertCircle, KeyRound, LoaderCircle } from 'lucide-react';
 import { useAuth } from '../lib/authContext';
+import { useAccessPayment } from '../lib/accessCheckoutContext';
+import { validTransactionHash } from '../lib/accessCheckoutApi';
 import { robinhoodMainnet } from '../lib/walletConfig';
 import { Button } from './ui/button';
 import './WalletGate.css';
@@ -10,7 +12,9 @@ import './WalletGate.css';
 export const WalletGate = ({ onProfileLoaded, testIdPrefix = 'wallet' }) => {
   const { switchChainAsync, isPending: switching } = useSwitchChain();
   const { disconnect } = useDisconnect();
-  const { user, status, loginWithWallet, logout, updateProfile, setAccessDialogOpen } = useAuth();
+  const { user, status, loginWithWallet, logout, updateProfile } = useAuth();
+  const checkout = useAccessPayment();
+  const [recoveryHash, setRecoveryHash] = useState('');
   const [signing, setSigning] = useState(false);
   const [showNickModal, setShowNickModal] = useState(false);
   const [newNick, setNewNick] = useState('');
@@ -21,7 +25,6 @@ export const WalletGate = ({ onProfileLoaded, testIdPrefix = 'wallet' }) => {
     setSigning(true);
     try {
       const acct = await loginWithWallet();
-      if (acct && !acct.paid_access) setAccessDialogOpen(true);
       if (acct?.paid_access && (!acct.nickname || acct.nickname.startsWith('Survivor_'))) {
         setNewNick(acct.nickname || '');
         setShowNickModal(true);
@@ -107,12 +110,12 @@ export const WalletGate = ({ onProfileLoaded, testIdPrefix = 'wallet' }) => {
                 <button
                   type="button"
                   className="wallet-btn siwe-btn"
-                  onClick={() => status === 'authenticated' && user ? setAccessDialogOpen(true) : handleSignIn()}
-                  disabled={signing}
+                  onClick={() => status === 'authenticated' && user ? checkout.unlock(recoveryHash.trim()) : handleSignIn()}
+                  disabled={signing || !!checkout.busy || status === 'loading' || (checkout.needsHash && !validTransactionHash(recoveryHash.trim()))}
                   data-testid={`${testIdPrefix}-siwe-btn`}
                 >
-                  {signing ? <LoaderCircle size={15} className="spin" /> : <KeyRound size={15} />}
-                  <span data-testid={`${testIdPrefix}-siwe-label`}>{signing ? 'SIGNING...' : user && status === 'authenticated' ? 'UNLOCK PLAY · $1' : 'SIGN TO PLAY'}</span>
+                  {signing || checkout.busy ? <LoaderCircle size={15} className="spin" /> : <KeyRound size={15} />}
+                  <span data-testid={`${testIdPrefix}-siwe-label`}>{signing ? 'SIGNING...' : checkout.busy === 'approving' ? 'APPROVE IN WALLET…' : checkout.busy === 'confirming' ? 'CONFIRMING…' : checkout.busy ? 'CHECKING…' : user && status === 'authenticated' ? (checkout.txHash || checkout.needsHash ? 'CHECK PAYMENT' : 'UNLOCK PLAY · $1') : 'SIGN TO PLAY'}</span>
                 </button>
                 <button
                   type="button"
@@ -148,6 +151,12 @@ export const WalletGate = ({ onProfileLoaded, testIdPrefix = 'wallet' }) => {
           );
         }}
       </ConnectButton.Custom>
+
+      {user && !user.paid_access && <>
+        {checkout.needsHash && <input className="wallet-recovery-input" aria-label="Payment transaction hash" placeholder="Transaction hash (0x…)" value={recoveryHash} onChange={event => setRecoveryHash(event.target.value)} data-testid={`${testIdPrefix}-recovery-hash`} />}
+        {checkout.txHash && <a className="wallet-payment-link" href={`${robinhoodMainnet.blockExplorers.default.url}/tx/${checkout.txHash}`} target="_blank" rel="noopener noreferrer" data-testid={`${testIdPrefix}-payment-transaction`}>View transaction ↗</a>}
+        {checkout.error && <p className="wallet-error-msg" role="alert" data-testid={`${testIdPrefix}-payment-error`}>{checkout.error}</p>}
+      </>}
 
       {errorMsg && (
         <div className="wallet-error-msg" role="alert" data-testid={`${testIdPrefix}-error`}>

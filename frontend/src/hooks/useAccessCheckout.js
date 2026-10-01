@@ -1,95 +1,104 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAccount } from 'wagmi';
 import { useNativePayment } from './useNativePayment';
 import { useAuth } from '../lib/authContext';
 import { robinhoodMainnet } from '../lib/walletConfig';
+import { accessRequest, accessErrorText, readAccessPending, saveAccessPending,
+  clearAccessPending, validTransactionHash, definitelyNotSent } from '../lib/accessCheckoutApi';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api/access`;
-const errorText = error => ({
-  PAYMENT_QUOTE_UNAVAILABLE: 'The ETH price is unavailable. Try again shortly.',
-  PAYMENT_VERIFICATION_UNAVAILABLE: 'Verification is temporarily unavailable. Retry the existing transaction; do not pay again.',
-  quote_expired: 'This quote expired before payment. Keep the transaction hash for review; do not send another payment.',
-  payment_failed: 'The transaction reverted. No access payment was transferred. Request a new quote to retry.',
-}[error.message] || error.shortMessage || error.message || 'Could not complete payment. Please retry.');
-
-async function accessRequest(path = '', body) {
-  const token = localStorage.getItem('dz_auth_token');
-  const response = await fetch(`${API}${path}`, {
-    method: body === undefined ? 'GET' : 'POST', credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Payment request failed.');
-  return data;
-}
-
-export const useAccessCheckout = open => {
-  const { user, checkAuth } = useAuth();
+// Mounted once by AccessCheckoutProvider; header and lobby share the same lock.
+export const useAccessCheckout = () => {
+  const { user, status, checkAuth } = useAuth();
   const { address, chainId } = useAccount();
   const { sendNativePayment } = useNativePayment();
-  const [state, setState] = useState(null), [busy, setBusy] = useState(''), [error, setError] = useState('');
-  const generation = useRef(0), sending = useRef(false);
-  const key = `lastzhood-access:${user?.address?.toLowerCase()}`;
+  const owner = status === 'authenticated' && address?.toLowerCase() === user?.address?.toLowerCase()
+    && chainId === robinhoodMainnet.id ? user.address.toLowerCase() : '';
+  const currentOwner = useRef(owner), inFlight = useRef(false), executeRef = useRef(null);
+  currentOwner.current = owner;
+  const [busy, setBusy] = useState('');
+  const [view, setView] = useState({ owner: '', error: '', txHash: '', needsHash: false });
+  const update = patch => { if (currentOwner.current === owner) setView(previous => ({ ...previous, owner, ...patch })); };
 
-  const load = useCallback(async (refresh = false) => {
-    const run = ++generation.current;
-    setBusy('loading'); setError('');
-    try {
-      let data = await accessRequest();
-      let pending;
-      try { pending = JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { /* Invalid local cache is not a paid entitlement. */ }
-      if (!data.paid && pending && data.order?.order_id === pending.order_id) {
-        data = await accessRequest('/submit', pending);
-      } else if (!data.paid && !data.order?.tx_hash && (refresh || !data.order?.quote || data.order.quote.payment_mode !== 'native_transfer')) {
-        data = await accessRequest('/quote', {});
+  const execute = async (allowSend = false, recoveredHash = '') => {
+    if (!owner || inFlight.current) return;
+    inFlight.current = true;
+    setBusy('preparing');
+    update({ error: '' });
+    const run = async () => {
+      let result = await accessRequest();
+      const finishPaid = async () => {
+        clearAccessPending(owner);
+        update({ error: '', txHash: '', needsHash: false });
+        if (currentOwner.current === owner) await checkAuth();
+      };
+      if (result.paid) { await finishPaid(); return; }
+      if (currentOwner.current !== owner) return;
+      const pending = readAccessPending(owner);
+      let order = result.order;
+      if (pending && pending.order_id !== order?.order_id) throw new Error('PAYMENT_RECOVERY_CONFLICT');
+      let hash = order?.tx_hash || pending?.tx_hash;
+      if (!hash && pending?.wallet_pending) {
+        update({ needsHash: true });
+        if (!validTransactionHash(recoveredHash)) throw new Error('PAYMENT_UNRESOLVED');
+        hash = recoveredHash;
       }
-      if (run !== generation.current) return;
-      setState(data);
-      if (data.paid) { localStorage.removeItem(key); await checkAuth(); }
-    } catch (e) { if (run === generation.current) setError(errorText(e)); }
-    finally { if (run === generation.current) setBusy(''); }
-  }, [key, checkAuth]);
-
-  useEffect(() => {
-    if (open && user?.address) { setState(null); load(); }
-    return () => { generation.current += 1; };
-  }, [open, user?.address, load]);
-
-  const confirm = async (existingHash) => {
-    if (sending.current || !state?.order) return;
-    const order = state.order, quote = order.quote, run = generation.current;
-    const owner = user?.address?.toLowerCase();
-    if (chainId !== robinhoodMainnet.id || quote?.chain_id !== robinhoodMainnet.id || address?.toLowerCase() !== owner) {
-      setError('Connect the signed-in wallet on Robinhood Chain Mainnet (4663).'); return;
-    }
-    sending.current = true; setError('');
-    try {
-      let hash = existingHash || order.tx_hash;
+      if (!hash && !allowSend) return;
       if (!hash) {
-        if (Date.parse(quote.expires_at) <= Date.now()) throw new Error('Quote expired. Refresh the quote before paying.');
-        const latest = await accessRequest();
-        if (latest.paid) { setState(latest); await checkAuth(); return; }
-        if (latest.order?.tx_hash) hash = latest.order.tx_hash;
-        else {
-          if (latest.order?.quote?.quote_id !== quote.quote_id) throw new Error('The quote changed. Reload and review the new amount.');
+        result = await accessRequest('/quote', {});
+        if (result.paid) { await finishPaid(); return; }
+        order = result.order;
+        hash = order?.tx_hash;
+        if (!hash) {
+          if (currentOwner.current !== owner) return;
+          // Persist BEFORE the wallet request. An interrupted request is not
+          // permission to send twice, even across refreshes or other tabs.
+          saveAccessPending(owner, { order_id: order.order_id, wallet_pending: true });
           setBusy('approving');
-          hash = await sendNativePayment(quote, address);
+          try {
+            hash = await sendNativePayment(order.quote, address);
+            if (!validTransactionHash(hash)) throw new Error('PAYMENT_UNRESOLVED');
+          } catch (error) {
+            if (definitelyNotSent(error)) clearAccessPending(owner);
+            else update({ needsHash: true });
+            throw error;
+          }
         }
-        localStorage.setItem(key, JSON.stringify({ order_id: order.order_id, tx_hash: hash }));
       }
-      if (run === generation.current) { setState(s => ({ ...s, order: { ...order, tx_hash: hash } })); setBusy('confirming'); }
-      // Request-scoped confirmation wait; the durable order survives reloads.
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const result = await accessRequest('/submit', { order_id: order.order_id, tx_hash: hash });
-        if (run !== generation.current) return;
-        setState(result);
-        if (result.paid) { localStorage.removeItem(key); await checkAuth(); return; }
+      saveAccessPending(owner, { order_id: order.order_id, tx_hash: hash });
+      update({ txHash: hash, needsHash: false });
+      if (currentOwner.current !== owner) return;
+      setBusy('confirming');
+      const deadline = Date.now() + 45000;
+      for (let attempt = 0; attempt < 20 && Date.now() < deadline; attempt += 1) {
+        if (currentOwner.current !== owner) return;
+        result = await accessRequest('/submit', { order_id: order.order_id, tx_hash: hash }, Math.min(12000, deadline - Date.now()));
+        if (currentOwner.current !== owner) return;
+        if (result.paid) { await finishPaid(); return; }
+        if (result.order?.payment_verified) throw new Error('Payment recorded; access is not available yet. Check payment again; do not pay again.');
         await new Promise(resolve => setTimeout(resolve, 1500));
       }
-      setError('Payment is still confirming. Retry verification with the same transaction; no additional payment is needed.');
-    } catch (e) { if (run === generation.current) setError(errorText(e)); }
-    finally { sending.current = false; if (run === generation.current) setBusy(''); }
+      throw new Error('Your transfer is pending. Check payment again; no new transfer is needed.');
+    };
+    try {
+      // Web Locks also prevent two tabs from opening concurrent approvals.
+      if (navigator.locks?.request) {
+        await navigator.locks.request(`lastzhood-access:${owner}`, { ifAvailable: true }, async lock => {
+          if (!lock) throw new Error('Payment is already open in another tab.');
+          await run();
+        });
+      } else await run();
+    } catch (error) {
+      if (error.message === 'payment_failed') { clearAccessPending(owner); update({ txHash: '', needsHash: false }); }
+      update({ error: accessErrorText(error) });
+    } finally { inFlight.current = false; setBusy(''); }
   };
-  return { state, busy, error, load, confirm };
+  executeRef.current = execute;
+  useEffect(() => {
+    setView({ owner, error: '', txHash: '', needsHash: false });
+    // Recovery can verify an existing transfer; it must NEVER open the wallet.
+    if (owner && !user?.paid_access) executeRef.current(false);
+  }, [owner, user?.paid_access]);
+
+  const visible = view.owner === owner ? view : { error: '', txHash: '', needsHash: false };
+  return { busy, ...visible, unlock: hash => execute(true, hash) };
 };

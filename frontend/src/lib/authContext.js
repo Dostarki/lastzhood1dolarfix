@@ -25,7 +25,6 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [status, setStatus] = useState('loading');
-  const [accessDialogOpen, setAccessDialogOpen] = useState(false);
   const { address, chainId, status: walletStatus } = useAccount();
   const { signMessageAsync } = useSignMessage();
 
@@ -45,7 +44,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     // Remove access immediately, even if the logout request needs a retry.
-    setUser(null); setStatus('unauthenticated'); setAccessDialogOpen(false);
+    setUser(null); setStatus('unauthenticated');
     try { await request('/auth/logout', {}); }
     finally { localStorage.removeItem(TOKEN_KEY); setToken(null); }
   }, []);
@@ -82,8 +81,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(() => ({ user, token, status, loading: status === 'loading', checkAuth,
-    loginWithWallet, logout, updateProfile, accessDialogOpen, setAccessDialogOpen }),
-  [user, token, status, checkAuth, loginWithWallet, logout, updateProfile, accessDialogOpen]);
+    loginWithWallet, logout, updateProfile }),
+  [user, token, status, checkAuth, loginWithWallet, logout, updateProfile]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

@@ -162,7 +162,9 @@ async def reserve_transaction_hash(db, order: dict, tx_hash: str, authenticated_
     return latest
 
 
-async def verify_transaction(db, order: dict, tx_hash: str, authenticated_account: str):
+async def verify_transaction(db, order: dict, tx_hash: str, authenticated_account: str, *, required_confirmations: int = CONFIRMATIONS):
+    if type(required_confirmations) is not int or required_confirmations < 1:
+        raise ValueError('invalid_confirmation_requirement')
     quote = order.get('quote') or {}
     if quote.get('chain_id') != CHAIN_ID:
         raise ValueError('payment_quote_wrong_chain')
@@ -221,7 +223,7 @@ async def verify_transaction(db, order: dict, tx_hash: str, authenticated_accoun
         if not time_matches(quote):
             raise ValueError('quote_expired')
         confirmations = int(head, 16) - int(receipt['blockNumber'], 16) + 1
-        if confirmations < CONFIRMATIONS:
+        if confirmations < required_confirmations:
             return {'status': 'confirming', 'verified': False, 'confirmations': confirmations}
     duplicate = await db.purchase_orders.find_one({'chain_id': CHAIN_ID, 'tx_hash': tx_hash.lower(), 'order_id': {'$ne': order['order_id']}}, {'_id': 0})
     if duplicate:

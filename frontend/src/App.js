@@ -78,7 +78,7 @@ export function GameApp() {
   }, [inGame, session.mode, location.pathname, navigate]);
   useEffect(() => {
     const keyDownHandler = e => {
-      if (connectModalOpen || accountModalOpen || chainModalOpen || document.querySelector('[data-testid="access-payment-dialog"]')) return;
+      if (connectModalOpen || accountModalOpen || chainModalOpen) return;
       if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName) || e.target.isContentEditable) return;
       const isAlive = session.state?.me.hp > 0;
 

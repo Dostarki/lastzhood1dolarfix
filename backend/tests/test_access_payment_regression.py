@@ -50,7 +50,7 @@ def test_access_quote_reuses_one_active_order_and_keeps_price_fixed(tmp_path, mo
 
 
 def test_access_submit_pending_confirmation_never_grants_entitlement(tmp_path, monkeypatch):
-    """Modules/features: access submit waits for 2 confirmations before entitlement."""
+    """Modules/features: access submit waits for 1 confirmation before entitlement."""
 
     monkeypatch.setattr(player_accounts, 'LOCAL_STORAGE_FILE', tmp_path / 'local.json')
 
@@ -67,7 +67,8 @@ def test_access_submit_pending_confirmation_never_grants_entitlement(tmp_path, m
         state = await access_payments.quote_access(db, account)
         order_id = state['order']['order_id']
 
-        async def fake_verify(_db, _order, _hash, _owner):
+        async def fake_verify(_db, _order, _hash, _owner, *, required_confirmations):
+            assert required_confirmations == 1
             return {'status': 'confirming', 'verified': False, 'confirmations': 1}
 
         monkeypatch.setattr(access_payments, 'verify_transaction', fake_verify)
@@ -98,7 +99,8 @@ def test_access_verified_payment_grants_once_and_repeat_submit_is_idempotent(tmp
         state = await access_payments.quote_access(db, account)
         order = state['order']
 
-        async def fake_verify(_db, _order, _hash, _owner):
+        async def fake_verify(_db, _order, _hash, _owner, *, required_confirmations):
+            assert required_confirmations == 1
             return {
                 'status': 'paid',
                 'verified': True,
@@ -138,7 +140,8 @@ def test_access_failed_receipt_keeps_audit_and_allows_new_attempt(tmp_path, monk
         initial = await access_payments.quote_access(db, account)
         first_order_id = initial['order']['order_id']
 
-        async def fake_failed(_db, _order, _hash, _owner):
+        async def fake_failed(_db, _order, _hash, _owner, *, required_confirmations):
+            assert required_confirmations == 1
             raise ValueError('payment_failed')
 
         monkeypatch.setattr(access_payments, 'verify_transaction', fake_failed)
@@ -182,7 +185,8 @@ def test_access_accepts_verified_old_quote_from_quote_history(tmp_path, monkeypa
             {'$set': {'quote': new_quote, 'quote_history': [old_quote], 'status': 'awaiting_payment'}},
         )
 
-        async def fake_verify(_db, _order, _hash, _owner):
+        async def fake_verify(_db, _order, _hash, _owner, *, required_confirmations):
+            assert required_confirmations == 1
             return {
                 'status': 'paid',
                 'verified': True,
@@ -221,7 +225,8 @@ def test_access_concurrent_duplicate_submits_do_not_double_grant(tmp_path, monke
         state = await access_payments.quote_access(db, account)
         order = state['order']
 
-        async def slow_verified(_db, _order, _hash, _owner):
+        async def slow_verified(_db, _order, _hash, _owner, *, required_confirmations):
+            assert required_confirmations == 1
             await asyncio.sleep(0.03)
             return {
                 'status': 'paid',
